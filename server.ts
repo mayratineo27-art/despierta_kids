@@ -191,31 +191,88 @@ async function startServer() {
     }
   });
 
+  // Helper function to check and award achievements
+  const checkAchievements = (childId: number, streak: number, wakeUpHour: number) => {
+    const existingAchievements = db.prepare("SELECT title FROM achievements WHERE child_id = ?").all(childId) as Array<{ title: string }>;
+    const existingTitles = existingAchievements.map(a => a.title);
+    const newAchievements: Array<{ title: string, icon: string }> = [];
+
+    const achievements = [
+      { title: 'Primera Victoria', icon: '🌟', condition: streak >= 1 },
+      { title: 'Madrugador Experto', icon: '🌅', condition: wakeUpHour < 7 },
+      { title: 'Racha de 3 Días', icon: '🔥', condition: streak >= 3 },
+      { title: 'Semana Perfecta', icon: '💎', condition: streak >= 7 },
+      { title: 'Dos Semanas Imparable', icon: '⚡', condition: streak >= 14 },
+      { title: 'Maestro del Despertar', icon: '👑', condition: streak >= 21 },
+      { title: 'Leyenda Matutina', icon: '🏆', condition: streak >= 30 },
+    ];
+
+    achievements.forEach(ach => {
+      if (ach.condition && !existingTitles.includes(ach.title)) {
+        db.prepare("INSERT INTO achievements (child_id, title, icon, unlocked_at) VALUES (?, ?, ?, ?)")
+          .run(childId, ach.title, ach.icon, new Date().toISOString());
+        newAchievements.push(ach);
+      }
+    });
+
+    return newAchievements;
+  };
+
   app.post("/api/child/:id/wake-up", (req, res) => {
     const { success, score } = req.body;
     const childId = req.params.id;
+    
+    // Validaciones
+    if (!childId || isNaN(Number(childId))) {
+      return res.status(400).json({ error: "Invalid child ID" });
+    }
+    if (typeof success !== 'boolean') {
+      return res.status(400).json({ error: "Success must be a boolean" });
+    }
+    if (score && (typeof score !== 'number' || score < 0 || score > 100)) {
+      return res.status(400).json({ error: "Score must be between 0 and 100" });
+    }
+    
     const now = new Date();
     const today = now.toISOString().split('T')[0];
     const hour = now.getHours();
     
-    const child = db.prepare("SELECT name, last_wake_up, current_streak, max_streak, avatar_stage FROM children WHERE id = ?").get(childId) as any;
+    const child = db.prepare("SELECT name, last_wake_up, current_streak, max_streak, avatar_stage, coins, stars FROM children WHERE id = ?").get(childId) as any;
+    
+    if (!child) {
+      return res.status(404).json({ error: "Child not found" });
+    }
     
     let newStreak = child.current_streak;
     let bonusStars = 0;
     let isEarlyBird = false;
+    let perfectScore = false;
 
     if (success) {
+      // Verificar si ya despertó hoy
+      const todayHistory = db.prepare("SELECT id FROM history WHERE child_id = ? AND date = ?").get(childId, today);
+      if (todayHistory) {
+        return res.status(400).json({ error: "Ya has registrado tu despertar de hoy" });
+      }
+
       // Record history
       db.prepare("INSERT INTO history (child_id, date, success, score) VALUES (?, ?, ?, ?)")
         .run(childId, today, 1, score || 10);
 
-      // Early Bird Bonus (before 7:00 AM)
+      // Bonus calculations
       if (hour < 7) {
         bonusStars = 10;
         isEarlyBird = true;
       }
+      if (score >= 15) {
+        bonusStars += 5;
+        perfectScore = true;
+      }
+      if (hour >= 6 && hour < 8) {
+        bonusStars += 2; // Bonus por despertarse en hora óptima
+      }
 
-      // Simple streak logic
+      // Streak logic mejorado
       const lastDate = child.last_wake_up ? child.last_wake_up.split('T')[0] : null;
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
@@ -227,49 +284,119 @@ async function startServer() {
         newStreak = 1;
       }
       
+      // Bonus por racha larga
+      if (newStreak >= 7) bonusStars += 5;
+      if (newStreak >= 14) bonusStars += 10;
+      if (newStreak >= 21) bonusStars += 20;
+      
       const newMaxStreak = Math.max(newStreak, child.max_streak);
       
-      // Evolution logic
+      // Evolution logic mejorado
       let newStage = child.avatar_stage;
-      if (newStreak >= 5 && child.avatar_stage === 1) newStage = 2;
-      if (newStreak >= 15 && child.avatar_stage === 2) newStage = 3;
+      let evolved = false;
+      if (newStreak >= 5 && child.avatar_stage === 1) {
+        newStage = 2;
+        evolved = true;
+      }
+      if (newStreak >= 15 && child.avatar_stage === 2) {
+        newStage = 3;
+        evolved = true;
+      }
 
+      // Calcular rewards escalados con el score
+      const baseCoins = 10;
+      const baseXP = 50;
+      const scoreMultiplier = (score || 10) / 10;
+      const earnedCoins = Math.floor(baseCoins * scoreMultiplier);
+      const earnedXP = Math.floor(baseXP * scoreMultiplier);
+      const earnedStars = 1 + bonusStars;
+
+      // Actualizar datos del niño
       db.prepare(`
         UPDATE children 
         SET current_streak = ?, max_streak = ?, last_wake_up = ?, avatar_stage = ?, 
-            stars = stars + ?, coins = coins + 10, xp = xp + 50 
+            stars = stars + ?, coins = coins + ?, xp = xp + ? 
         WHERE id = ?
-      `).run(newStreak, newMaxStreak, now.toISOString(), newStage, 1 + bonusStars, childId);
+      `).run(newStreak, newMaxStreak, now.toISOString(), newStage, earnedStars, earnedCoins, earnedXP, childId);
 
-      // Create notification for parent
-      const message = `${child.name} se ha despertado con un puntaje de ${score || 10}! ${isEarlyBird ? '🚀 ¡BONO MADRUGADOR ACTIVADO!' : ''}`;
+      // Check for level up
+      const updatedChild = db.prepare("SELECT xp, level FROM children WHERE id = ?").get(childId) as { xp: number, level: number };
+      const nextLevelXp = updatedChild.level * 100;
+      if (updatedChild.xp >= nextLevelXp) {
+        db.prepare("UPDATE children SET level = level + 1, xp = 0 WHERE id = ?").run(childId);
+        db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
+          .run(childId, `¡NIVEL SUPERIOR! ${child.name} ahora es Nivel ${updatedChild.level + 1}! 🎉`, 'achievement', now.toISOString());
+      }
+
+      // Notificación de despertar
+      let message = `${child.name} se ha despertado con un puntaje de ${score || 10}!`;
+      if (isEarlyBird) message += ' 🚀 ¡BONO MADRUGADOR!';
+      if (perfectScore) message += ' 💯 ¡PUNTAJE PERFECTO!';
+      if (evolved) message += ` 🎊 ¡TU MASCOTA HA EVOLUCIONADO A ETAPA ${newStage}!`;
+      
       db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
         .run(childId, message, 'wake_up', now.toISOString());
 
       // Add world object if streak is multiple of 3
       if (newStreak % 3 === 0) {
-        const types = ['tree', 'house', 'decoration'];
-        const type = types[Math.floor(Math.random() * types.length)];
+        const worldObjects = [
+          { type: 'tree', names: ['Árbol Mágico', 'Sauce Dorado', 'Roble Antiguo', 'Cerezo en Flor'] },
+          { type: 'house', names: ['Casita Acogedora', 'Torre Mágica', 'Cabaña del Bosque', 'Palacio Mini'] },
+          { type: 'decoration', names: ['Fuente Cristalina', 'Estatua Brillante', 'Jardín Zen', 'Arcoíris'] },
+          { type: 'flower', names: ['Girasoles', 'Tulipanes', 'Rosas Mágicas', 'Orquídeas'] }
+        ];
+        const objType = worldObjects[Math.floor(Math.random() * worldObjects.length)];
+        const objName = objType.names[Math.floor(Math.random() * objType.names.length)];
+        
         db.prepare("INSERT INTO world_objects (child_id, type, name, x, y) VALUES (?, ?, ?, ?, ?)")
-          .run(childId, type, `Objeto de Racha ${newStreak}`, Math.random() * 80, Math.random() * 80);
+          .run(childId, objType.type, objName, 10 + Math.random() * 70, 10 + Math.random() * 70);
+        
+        db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
+          .run(childId, `¡NUEVO OBJETO! Has desbloqueado: ${objName} 🎁`, 'achievement', now.toISOString());
       }
 
       // Discover new pet every 7 days
       if (newStreak > 0 && newStreak % 7 === 0) {
-        const petNames = ['Pingu', 'Robotín', 'Tigrito', 'Dino'];
-        const name = petNames[Math.floor(Math.random() * petNames.length)];
-        // Check if already has it
-        const exists = db.prepare("SELECT id FROM collectibles WHERE child_id = ? AND name = ?").get(childId, name);
-        if (!exists) {
-          db.prepare("INSERT INTO collectibles (child_id, type, name, stage) VALUES (?, ?, ?, ?)")
-            .run(childId, 'pet', name, 1);
-          
-          db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
-            .run(childId, `¡NUEVA MASCOTA! ${child.name} ha descubierto a ${name}!`, 'achievement', now.toISOString());
+        const availablePets = [
+          { name: 'Pingu', emoji: '🐧' },
+          { name: 'Robotín', emoji: '🤖' },
+          { name: 'Tigrito', emoji: '🐯' },
+          { name: 'Dino', emoji: '🦕' },
+          { name: 'Unicornio', emoji: '🦄' },
+          { name: 'Fénix', emoji: '🔥' }
+        ];
+        
+        for (const pet of availablePets) {
+          const exists = db.prepare("SELECT id FROM collectibles WHERE child_id = ? AND name = ?").get(childId, pet.name);
+          if (!exists) {
+            db.prepare("INSERT INTO collectibles (child_id, type, name, stage) VALUES (?, ?, ?, ?)")
+              .run(childId, 'pet', pet.name, 1);
+            
+            db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
+              .run(childId, `¡NUEVA MASCOTA! ${child.name} ha descubierto a ${pet.name} ${pet.emoji}!`, 'achievement', now.toISOString());
+            break; // Solo una mascota por vez
+          }
         }
       }
 
-      broadcast({ type: 'WAKE_UP', childId, name: child.name, score, streak: newStreak });
+      // Check and award achievements
+      const newAchievements = checkAchievements(childId, newStreak, hour);
+      if (newAchievements.length > 0) {
+        newAchievements.forEach(ach => {
+          db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
+            .run(childId, `¡LOGRO DESBLOQUEADO! ${ach.icon} ${ach.title}`, 'achievement', now.toISOString());
+        });
+      }
+
+      broadcast({ 
+        type: 'WAKE_UP', 
+        childId, 
+        name: child.name, 
+        score, 
+        streak: newStreak,
+        rewards: { stars: earnedStars, coins: earnedCoins, xp: earnedXP },
+        achievements: newAchievements
+      });
     }
     
     res.json({ success: true, streak: newStreak, isEarlyBird });
@@ -277,47 +404,159 @@ async function startServer() {
 
   app.post("/api/child/:id/reward", (req, res) => {
     const { stars, coins, xp } = req.body;
-    db.prepare("UPDATE children SET stars = stars + ?, coins = coins + ?, xp = xp + ? WHERE id = ?")
-      .run(stars || 0, coins || 0, xp || 0, req.params.id);
+    const childId = req.params.id;
     
-    const child = db.prepare("SELECT xp, level FROM children WHERE id = ?").get(req.params.id) as { xp: number, level: number };
-    const nextLevelXp = child.level * 100;
-    if (child.xp >= nextLevelXp) {
-      db.prepare("UPDATE children SET level = level + 1, xp = xp - ? WHERE id = ?").run(nextLevelXp, req.params.id);
+    // Validaciones
+    if (!childId || isNaN(Number(childId))) {
+      return res.status(400).json({ error: "Invalid child ID" });
     }
     
-    res.json({ success: true });
+    const starsToAdd = Math.max(0, parseInt(stars) || 0);
+    const coinsToAdd = Math.max(0, parseInt(coins) || 0);
+    const xpToAdd = Math.max(0, parseInt(xp) || 0);
+    
+    if (starsToAdd === 0 && coinsToAdd === 0 && xpToAdd === 0) {
+      return res.status(400).json({ error: "No rewards to add" });
+    }
+    
+    const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId) as any;
+    if (!child) {
+      return res.status(404).json({ error: "Child not found" });
+    }
+    
+    db.prepare("UPDATE children SET stars = stars + ?, coins = coins + ?, xp = xp + ? WHERE id = ?")
+      .run(starsToAdd, coinsToAdd, xpToAdd, childId);
+    
+    const updatedChild = db.prepare("SELECT xp, level, name FROM children WHERE id = ?").get(childId) as { xp: number, level: number, name: string };
+    const nextLevelXp = updatedChild.level * 100;
+    let leveledUp = false;
+    
+    if (updatedChild.xp >= nextLevelXp) {
+      db.prepare("UPDATE children SET level = level + 1, xp = 0 WHERE id = ?").run(childId);
+      leveledUp = true;
+      
+      db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
+        .run(childId, `¡${updatedChild.name} subió a Nivel ${updatedChild.level + 1}! 🎉`, 'achievement', new Date().toISOString());
+    }
+    
+    res.json({ success: true, leveledUp, newLevel: leveledUp ? updatedChild.level + 1 : updatedChild.level });
   });
 
   app.post("/api/settings/:childId", (req, res) => {
     const { wake_up_time, difficulty, vacation_mode } = req.body;
+    const childId = req.params.childId;
+    
+    // Validaciones
+    if (!childId || isNaN(Number(childId))) {
+      return res.status(400).json({ error: "Invalid child ID" });
+    }
+    
+    const child = db.prepare("SELECT id FROM children WHERE id = ?").get(childId);
+    if (!child) {
+      return res.status(404).json({ error: "Child not found" });
+    }
+    
     if (wake_up_time !== undefined) {
-      db.prepare("UPDATE settings SET wake_up_time = ? WHERE child_id = ?").run(wake_up_time, req.params.childId);
+      // Validar formato de hora HH:MM
+      const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+      if (!timeRegex.test(wake_up_time)) {
+        return res.status(400).json({ error: "Invalid time format. Use HH:MM" });
+      }
+      db.prepare("UPDATE settings SET wake_up_time = ? WHERE child_id = ?").run(wake_up_time, childId);
     }
+    
     if (difficulty !== undefined) {
-      db.prepare("UPDATE settings SET difficulty = ? WHERE child_id = ?").run(difficulty, req.params.childId);
+      const validDifficulties = ['easy', 'normal', 'hard'];
+      if (!validDifficulties.includes(difficulty)) {
+        return res.status(400).json({ error: "Invalid difficulty. Use: easy, normal, hard" });
+      }
+      db.prepare("UPDATE settings SET difficulty = ? WHERE child_id = ?").run(difficulty, childId);
     }
+    
     if (vacation_mode !== undefined) {
-      db.prepare("UPDATE children SET vacation_mode = ? WHERE id = ?").run(vacation_mode ? 1 : 0, req.params.childId);
+      if (typeof vacation_mode !== 'boolean') {
+        return res.status(400).json({ error: "vacation_mode must be a boolean" });
+      }
+      db.prepare("UPDATE children SET vacation_mode = ? WHERE id = ?").run(vacation_mode ? 1 : 0, childId);
+      
+      const childName = db.prepare("SELECT name FROM children WHERE id = ?").get(childId) as { name: string };
+      const message = vacation_mode 
+        ? `Modo vacaciones activado para ${childName.name}. Las rachas están pausadas. 🏖️`
+        : `Modo vacaciones desactivado para ${childName.name}. ¡De vuelta a la aventura! 🚀`;
+      
+      db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
+        .run(childId, message, 'achievement', new Date().toISOString());
     }
-    res.json({ success: true });
+    
+    res.json({ success: true, updated: { wake_up_time, difficulty, vacation_mode } });
   });
 
   app.post("/api/child/:id/buy", (req, res) => {
     const { type, name, cost } = req.body;
     const childId = req.params.id;
     
+    // Validaciones
+    if (!childId || isNaN(Number(childId))) {
+      return res.status(400).json({ error: "Invalid child ID" });
+    }
+    if (!type || !name || !cost) {
+      return res.status(400).json({ error: "Missing required fields: type, name, cost" });
+    }
+    if (typeof cost !== 'number' || cost < 0) {
+      return res.status(400).json({ error: "Cost must be a positive number" });
+    }
+    
+    const validTypes = ['tree', 'house', 'decoration', 'flower', 'cloud'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ error: "Invalid object type" });
+    }
+    
     const child = db.prepare("SELECT coins, name FROM children WHERE id = ?").get(childId) as { coins: number, name: string };
     
+    if (!child) {
+      return res.status(404).json({ error: "Child not found" });
+    }
+    
     if (child.coins >= cost) {
-      db.prepare("UPDATE children SET coins = coins - ? WHERE id = ?").run(cost, childId);
-      db.prepare("INSERT INTO world_objects (child_id, type, name, x, y) VALUES (?, ?, ?, ?, ?)")
-        .run(childId, type, name, 10 + Math.random() * 80, 10 + Math.random() * 80);
-      
-      broadcast({ type: 'PURCHASE', childId, name: child.name, item: name });
-      res.json({ success: true });
+      // Usar transacción para asegurar consistencia
+      try {
+        db.prepare("BEGIN TRANSACTION").run();
+        
+        db.prepare("UPDATE children SET coins = coins - ? WHERE id = ?").run(cost, childId);
+        
+        // Generar posición que no colisione con objetos existentes
+        let x, y, attempts = 0;
+        let collision = true;
+        
+        while (collision && attempts < 10) {
+          x = 10 + Math.random() * 70;
+          y = 10 + Math.random() * 70;
+          
+          const nearby = db.prepare(
+            "SELECT COUNT(*) as count FROM world_objects WHERE child_id = ? AND ABS(x - ?) < 15 AND ABS(y - ?) < 15"
+          ).get(childId, x, y) as { count: number };
+          
+          collision = nearby.count > 0;
+          attempts++;
+        }
+        
+        db.prepare("INSERT INTO world_objects (child_id, type, name, x, y) VALUES (?, ?, ?, ?, ?)")
+          .run(childId, type, name, x || 50, y || 50);
+        
+        db.prepare("INSERT INTO notifications (child_id, message, type, created_at) VALUES (?, ?, ?, ?)")
+          .run(childId, `¡${child.name} ha comprado ${name}! 🛒`, 'achievement', new Date().toISOString());
+        
+        db.prepare("COMMIT").run();
+        
+        broadcast({ type: 'PURCHASE', childId, name: child.name, item: name });
+        res.json({ success: true, remainingCoins: child.coins - cost });
+      } catch (error) {
+        db.prepare("ROLLBACK").run();
+        console.error("Purchase error:", error);
+        res.status(500).json({ error: "Purchase failed" });
+      }
     } else {
-      res.status(400).json({ error: "Not enough coins" });
+      res.status(400).json({ error: "No tienes suficientes monedas", required: cost, available: child.coins });
     }
   });
 

@@ -374,86 +374,226 @@ const Missions = ({ data }: { data: ChildData }) => {
 };
 
 const MiniGame = ({ onComplete }: { onComplete: (score: number) => void }) => {
-  const [gameType, setGameType] = useState<'adoptme' | 'robux' | 'obby'>(
-    ['adoptme', 'robux', 'obby'][Math.floor(Math.random() * 3)] as any
+  const [gameType, setGameType] = useState<'math' | 'spelling' | 'quiz' | 'memory' | 'pattern'>(    
+    ['math', 'spelling', 'quiz', 'memory', 'pattern'][Math.floor(Math.random() * 5)] as any
   );
   const [target, setTarget] = useState<any>(null);
   const [question, setQuestion] = useState<string>('');
   const [options, setOptions] = useState<any[]>([]);
-  const [timeLeft, setTimeLeft] = useState(20); // Un poco más de tiempo para pensar
+  const [timeLeft, setTimeLeft] = useState(30); // Más tiempo
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const [attempts, setAttempts] = useState(0);
+  const [memoryCards, setMemoryCards] = useState<Array<{ id: number, value: string, revealed: boolean, matched: boolean }>>([]);
+  const [selectedCards, setSelectedCards] = useState<number[]>([]);
+  const [matchedPairs, setMatchedPairs] = useState(0);
 
   useEffect(() => {
-    if (gameType === 'adoptme') {
-      // Reto Matemático
-      const a = Math.floor(Math.random() * 10) + 1;
-      const b = Math.floor(Math.random() * 10) + 1;
-      const sum = a + b;
-      setQuestion(`¿Cuánto es ${a} + ${b}?`);
-      setTarget(sum);
+    if (gameType === 'math') {
+      // Reto Matemático - Dificultad adaptativa
+      const difficulty = Math.random();
+      let a, b, operation, result;
       
-      const opts = [sum];
+      if (difficulty < 0.4) {
+        // Fácil: sumas simples
+        a = Math.floor(Math.random() * 15) + 1;
+        b = Math.floor(Math.random() * 15) + 1;
+        operation = '+';
+        result = a + b;
+      } else if (difficulty < 0.7) {
+        // Medio: multiplicación o resta
+        const ops = ['+', '-', '×'];
+        operation = ops[Math.floor(Math.random() * ops.length)];
+        if (operation === '×') {
+          a = Math.floor(Math.random() * 10) + 1;
+          b = Math.floor(Math.random() * 10) + 1;
+          result = a * b;
+        } else if (operation === '-') {
+          a = Math.floor(Math.random() * 20) + 10;
+          b = Math.floor(Math.random() * 10) + 1;
+          result = a - b;
+        } else {
+          a = Math.floor(Math.random() * 20) + 1;
+          b = Math.floor(Math.random() * 20) + 1;
+          result = a + b;
+        }
+      } else {
+        // Difícil: operaciones combinadas
+        a = Math.floor(Math.random() * 12) + 1;
+        b = Math.floor(Math.random() * 12) + 1;
+        operation = '×';
+        result = a * b;
+      }
+      
+      setQuestion(`¿Cuánto es ${a} ${operation} ${b}?`);
+      setTarget(result);
+      
+      const opts = [result];
       while (opts.length < 4) {
-        const r = Math.floor(Math.random() * 20) + 1;
-        if (!opts.includes(r)) opts.push(r);
+        const offset = Math.floor(Math.random() * 10) - 5;
+        const r = result + offset;
+        if (!opts.includes(r) && r > 0) opts.push(r);
       }
       setOptions(opts.sort(() => Math.random() - 0.5));
-    } else if (gameType === 'robux') {
+      
+    } else if (gameType === 'spelling') {
       // Reto de Ortografía/Vocabulario
-      const words = ['ROBLOX', 'ESTUDIO', 'GENIO', 'MAGIA', 'CIENCIA', 'LIBRO'];
-      const word = words[Math.floor(Math.random() * words.length)];
+      const words = [
+        { word: 'MATEMÁTICAS', hint: 'Asignatura de números' },
+        { word: 'CIENCIA', hint: 'Experimentos y descubrimientos' },
+        { word: 'LECTURA', hint: 'Leer libros' },
+        { word: 'MÚSICA', hint: 'Sonidos y melodías' },
+        { word: 'FAMILIA', hint: 'Mamá, papá y hermanos' },
+        { word: 'AMISTAD', hint: 'Relación con amigos' },
+        { word: 'PLANETA', hint: 'La Tierra es uno' },
+        { word: 'BOSQUE', hint: 'Lleno de árboles' }
+      ];
+      const wordData = words[Math.floor(Math.random() * words.length)];
+      const word = wordData.word;
       const missingIndex = Math.floor(Math.random() * word.length);
       const missingChar = word[missingIndex];
       const displayWord = word.split('').map((c, i) => i === missingIndex ? '_' : c).join('');
       
-      setQuestion(`Completa la palabra: ${displayWord}`);
+      setQuestion(`${wordData.hint}: ${displayWord}`);
       setTarget(missingChar);
       
-      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const alphabet = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚ';
       const opts = [missingChar];
       while (opts.length < 4) {
         const r = alphabet[Math.floor(Math.random() * alphabet.length)];
         if (!opts.includes(r)) opts.push(r);
       }
       setOptions(opts.sort(() => Math.random() - 0.5));
-    } else if (gameType === 'obby') {
-      // Reto de Cultura General / Quiz Rápido
+      
+    } else if (gameType === 'quiz') {
+      // Quiz de Cultura General
       const quizzes = [
         { q: '¿El sol es una estrella?', a: 'SÍ' },
-        { q: '¿2 + 2 son 5?', a: 'NO' },
-        { q: '¿Los perros vuelan?', a: 'NO' },
+        { q: '¿Los perros pueden volar?', a: 'NO' },
+        { q: '¿El agua hierve a 100°C?', a: 'SÍ' },
+        { q: '¿La luna da luz propia?', a: 'NO' },
+        { q: '¿Las plantas necesitan agua?', a: 'SÍ' },
+        { q: '¿Los peces viven en la tierra?', a: 'NO' },
         { q: '¿El cielo es azul?', a: 'SÍ' },
-        { q: '¿Comer fruta es sano?', a: 'SÍ' }
+        { q: '¿Leer es bueno para el cerebro?', a: 'SÍ' },
+        { q: '¿Los elefantes son pequeños?', a: 'NO' },
+        { q: '¿La Tierra es redonda?', a: 'SÍ' }
       ];
       const quiz = quizzes[Math.floor(Math.random() * quizzes.length)];
       setQuestion(quiz.q);
       setTarget(quiz.a);
       setOptions(['SÍ', 'NO']);
+      
+    } else if (gameType === 'memory') {
+      // Juego de Memoria
+      const emojis = ['🌟', '🚀', '🌈', '🎉', '⭐', '💚'];
+      const pairs = emojis.slice(0, 4);
+      const cards = [...pairs, ...pairs]
+        .sort(() => Math.random() - 0.5)
+        .map((value, index) => ({ id: index, value, revealed: false, matched: false }));
+      
+      setMemoryCards(cards);
+      setQuestion('¡Encuentra las parejas!');
+      setTarget('memory');
+      
+    } else if (gameType === 'pattern') {
+      // Secuencia de Patrones
+      const patterns = [
+        { sequence: [2, 4, 6, 8, '?'], answer: 10, hint: 'Números pares' },
+        { sequence: [1, 3, 5, 7, '?'], answer: 9, hint: 'Números impares' },
+        { sequence: [5, 10, 15, 20, '?'], answer: 25, hint: 'De 5 en 5' },
+        { sequence: [10, 20, 30, 40, '?'], answer: 50, hint: 'De 10 en 10' },
+        { sequence: [1, 2, 4, 8, '?'], answer: 16, hint: 'Se duplica' },
+      ];
+      const pattern = patterns[Math.floor(Math.random() * patterns.length)];
+      setQuestion(`${pattern.hint}: ${pattern.sequence.join(', ')}`);
+      setTarget(pattern.answer);
+      
+      const opts = [pattern.answer];
+      while (opts.length < 4) {
+        const r = Math.floor(Math.random() * 50) + 1;
+        if (!opts.includes(r)) opts.push(r);
+      }
+      setOptions(opts.sort(() => Math.random() - 0.5));
     }
   }, [gameType]);
 
   useEffect(() => {
-    if (timeLeft <= 0) onComplete(0);
+    if (gameType === 'memory' && matchedPairs === 4) {
+      // Todas las parejas encontradas
+      playSound(SOUNDS.success);
+      confetti({ particleCount: 150, spread: 100 });
+      setTimeout(() => onComplete(20), 1000); // Bonus por memoria
+      return;
+    }
+    
+    if (timeLeft <= 0 && gameType !== 'memory') {
+      onComplete(Math.max(0, 10 - attempts * 2)); // Penalización por intentos
+    }
+    
     const timer = setInterval(() => setTimeLeft(t => t - 1), 1000);
     return () => clearInterval(timer);
-  }, [timeLeft, onComplete]);
+  }, [timeLeft, attempts, onComplete, gameType, matchedPairs]);
 
   const handleAnswer = (val: any) => {
     if (val === target) {
       setIsCorrect(true);
       playSound(SOUNDS.success);
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-      setTimeout(() => onComplete(15), 1000); // Más puntos por estudiar
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+      const bonusScore = Math.max(10, 20 - attempts * 2); // Más puntos con menos intentos
+      setTimeout(() => onComplete(bonusScore), 1000);
     } else {
       setIsCorrect(false);
+      setAttempts(a => a + 1);
       playSound(SOUNDS.click);
       setTimeout(() => setIsCorrect(null), 500);
     }
   };
+
+  const handleMemoryCardClick = (cardId: number) => {
+    if (selectedCards.length === 2 || memoryCards.find(c => c.id === cardId)?.matched) return;
+    
+    const newSelectedCards = [...selectedCards, cardId];
+    setSelectedCards(newSelectedCards);
+    
+    // Revelar carta
+    setMemoryCards(cards => cards.map(c => 
+      c.id === cardId ? { ...c, revealed: true } : c
+    ));
+    
+    if (newSelectedCards.length === 2) {
+      const [first, second] = newSelectedCards;
+      const firstCard = memoryCards.find(c => c.id === first);
+      const secondCard = memoryCards.find(c => c.id === second);
+      
+      setTimeout(() => {
+        if (firstCard?.value === secondCard?.value) {
+          // Match!
+          playSound(SOUNDS.success);
+          setMemoryCards(cards => cards.map(c => 
+            (c.id === first || c.id === second) ? { ...c, matched: true } : c
+          ));
+          setMatchedPairs(p => p + 1);
+        } else {
+          // No match
+          playSound(SOUNDS.click);
+          setMemoryCards(cards => cards.map(c => 
+            (c.id === first || c.id === second) ? { ...c, revealed: false } : c
+          ));
+        }
+        setSelectedCards([]);
+      }, 800);
+    }
+  };
+
+  const gameIcons: Record<string, { title: string, emoji: string, color: string }> = {
+    math: { title: 'Desafío Matemático', emoji: '🧠', color: 'indigo' },
+    spelling: { title: 'Maestro de Palabras', emoji: '📚', color: 'purple' },
+    quiz: { title: 'Quiz Inteligente', emoji: '🤓', color: 'emerald' },
+    memory: { title: 'Memoria de Campeón', emoji: '🧩', color: 'rose' },
+    pattern: { title: 'Patrón Secreto', emoji: '🔢', color: 'amber' },
+  };
+  
+  const currentGame = gameIcons[gameType] || gameIcons.math;
 
   return (
     <div className="text-center space-y-8 p-8 bg-white rounded-[3rem] shadow-2xl border-4 border-slate-100 relative overflow-hidden">
@@ -461,19 +601,16 @@ const MiniGame = ({ onComplete }: { onComplete: (score: number) => void }) => {
 
       <div className="space-y-3 relative z-10">
         <div className="flex justify-center gap-2 mb-2">
-          <div className="bg-rose-600 text-white px-4 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg">
-            ROBLOX ACADEMY
+          <div className={cn(
+            "text-white px-4 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg",
+            `bg-${currentGame.color}-600`
+          )}>
+            {currentGame.emoji} {currentGame.title}
           </div>
-          <div className="bg-indigo-600 text-white px-4 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-1">
-            <Sparkles className="w-3 h-3" /> BRAIN XP
+          <div className="bg-gradient-to-r from-brand-primary to-brand-secondary text-white px-4 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-1">
+            <Sparkles className="w-3 h-3" /> BRAIN XP +{20 - attempts * 2}
           </div>
         </div>
-        
-        <h2 className="text-4xl font-black text-slate-800 italic uppercase tracking-tighter">
-          {gameType === 'adoptme' && '¡Adopt Me! Math Quiz'}
-          {gameType === 'robux' && '¡Robux Spelling!'}
-          {gameType === 'obby' && '¡Brainy Obby!'}
-        </h2>
         
         <div className="bg-slate-50 p-6 rounded-[2rem] border-2 border-slate-100 shadow-inner">
           <p className="text-2xl font-black text-brand-primary uppercase tracking-tight">
@@ -482,47 +619,75 @@ const MiniGame = ({ onComplete }: { onComplete: (score: number) => void }) => {
         </div>
       </div>
       
-      <div className={cn(
-        "grid gap-6 relative z-10",
-        gameType === 'obby' ? "grid-cols-2" : "grid-cols-2"
-      )}>
-        {options.map((opt, i) => (
-          <motion.button
-            key={i}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => handleAnswer(opt)}
-            className={cn(
-              "p-10 text-5xl font-black rounded-[2rem] border-b-8 transition-all active:border-b-0 active:translate-y-2 flex items-center justify-center",
-              isCorrect === true && opt === target ? "bg-emerald-500 text-white border-emerald-700" :
-              isCorrect === false && opt !== target ? "bg-slate-100 text-slate-300 border-slate-200" :
-              "bg-white text-slate-800 border-slate-200 hover:border-brand-primary hover:bg-brand-primary hover:text-white"
-            )}
-          >
-            {opt}
-          </motion.button>
-        ))}
-      </div>
+      {gameType === 'memory' ? (
+        <div className="grid grid-cols-4 gap-4 relative z-10">
+          {memoryCards.map((card) => (
+            <motion.button
+              key={card.id}
+              whileHover={{ scale: card.matched ? 1 : 1.05 }}
+              whileTap={{ scale: card.matched ? 1 : 0.95 }}
+              onClick={() => handleMemoryCardClick(card.id)}
+              disabled={card.matched || card.revealed}
+              className={cn(
+                "aspect-square text-4xl font-black rounded-2xl border-4 transition-all flex items-center justify-center",
+                card.matched ? "bg-emerald-500 text-white border-emerald-700 scale-95" :
+                card.revealed ? "bg-white text-slate-800 border-brand-primary" :
+                "bg-brand-primary text-white border-brand-secondary hover:border-brand-accent"
+              )}
+            >
+              {card.revealed || card.matched ? card.value : '❓'}
+            </motion.button>
+          ))}
+        </div>
+      ) : (
+        <div className={cn(
+          "grid gap-6 relative z-10",
+          gameType === 'quiz' ? "grid-cols-2" : "grid-cols-2"
+        )}>
+          {options.map((opt, i) => (
+            <motion.button
+              key={i}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => handleAnswer(opt)}
+              className={cn(
+                "p-10 text-5xl font-black rounded-[2rem] border-b-8 transition-all active:border-b-0 active:translate-y-2 flex items-center justify-center",
+                isCorrect === true && opt === target ? "bg-emerald-500 text-white border-emerald-700" :
+                isCorrect === false && opt !== target ? "bg-slate-100 text-slate-300 border-slate-200" :
+                "bg-white text-slate-800 border-slate-200 hover:border-brand-primary hover:bg-brand-primary hover:text-white"
+              )}
+            >
+              {opt}
+            </motion.button>
+          ))}
+        </div>
+      )}
 
       <div className="space-y-2 relative z-10">
         <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
           <span>Tiempo para Pensar</span>
-          <span className={cn(timeLeft < 5 ? "text-rose-500 animate-pulse" : "")}>{timeLeft}s</span>
+          <span className={cn(timeLeft < 10 ? "text-rose-500 animate-pulse" : "")}>{timeLeft}s</span>
         </div>
         <div className="w-full bg-slate-100 h-5 rounded-full overflow-hidden border-2 border-slate-50 shadow-inner">
           <motion.div 
             className={cn(
               "h-full transition-colors",
-              timeLeft < 5 ? "bg-rose-500" : "bg-gradient-to-r from-indigo-500 to-brand-primary"
+              timeLeft < 10 ? "bg-rose-500" : "bg-gradient-to-r from-indigo-500 to-brand-primary"
             )}
             initial={{ width: '100%' }}
-            animate={{ width: `${(timeLeft / 20) * 100}%` }}
+            animate={{ width: `${(timeLeft / 30) * 100}%` }}
           />
         </div>
       </div>
 
+      {attempts > 0 && (
+        <p className="text-xs font-bold text-amber-600 italic animate-pulse">
+          ¡Intenta de nuevo! {attempts} {attempts === 1 ? 'intento' : 'intentos'}
+        </p>
+      )}
+
       <p className="text-[10px] font-bold text-slate-400 italic">
-        "¡Estudiar te da más estrellas para tus premios!"
+        "¡Estudiar te da más estrellas y mejores premios!"
       </p>
     </div>
   );
@@ -1375,13 +1540,33 @@ export default function App() {
   const handleAction = async (type: string, payload: any) => {
     if (type === 'wake-up') {
       stopAlarm();
-      await fetch(`/api/child/${activeChildId}/wake-up`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      fetchChildData();
-      fetchChildrenList();
+      try {
+        const res = await fetch(`/api/child/${activeChildId}/wake-up`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          // Mostrar feedback mejorado
+          if (data.isEarlyBird) {
+            setToast({ message: '🚀 ¡BONO MADRUGADOR ACTIVADO! +10 ⭐', type: 'success' });
+          }
+          if (data.streak >= 5) {
+            setToast({ message: `🔥 ¡Racha de ${data.streak} días! ¡Increíble!`, type: 'success' });
+          }
+        } else {
+          const error = await res.json();
+          setToast({ message: error.error, type: 'info' });
+        }
+        
+        fetchChildData();
+        fetchChildrenList();
+      } catch (error) {
+        console.error('Wake-up error:', error);
+        setToast({ message: 'Error al registrar despertar', type: 'info' });
+      }
     }
     if (type === 'reward') {
       await fetch(`/api/child/${activeChildId}/reward`, {
@@ -1400,19 +1585,33 @@ export default function App() {
       fetchChildData();
     }
     if (type === 'buy') {
-      const res = await fetch(`/api/child/${activeChildId}/buy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        playSound(SOUNDS.buy);
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 }
+      try {
+        const res = await fetch(`/api/child/${activeChildId}/buy`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
         });
-        fetchChildData();
+        
+        if (res.ok) {
+          playSound(SOUNDS.buy);
+          confetti({
+            particleCount: 100,
+            spread: 70,
+            origin: { y: 0.6 }
+          });
+          const data = await res.json();
+          setToast({ 
+            message: `✨ ¡Compraste ${payload.name}! Te quedan ${data.remainingCoins} monedas`, 
+            type: 'success' 
+          });
+          fetchChildData();
+        } else {
+          const error = await res.json();
+          setToast({ message: error.error, type: 'info' });
+        }
+      } catch (error) {
+        console.error('Buy error:', error);
+        setToast({ message: 'Error al comprar objeto', type: 'info' });
       }
     }
     if (type === 'add-reward') {
