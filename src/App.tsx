@@ -16,9 +16,16 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const playSound = (url: string) => {
+const playSound = (url: string, loop = false) => {
   const audio = new Audio(url);
-  audio.play().catch(e => console.log("Audio play blocked by browser", e));
+  audio.loop = loop;
+  audio.volume = 0.7; // Volumen al 70%
+  
+  // Intentar reproducir, si falla por política del navegador, mostrar mensaje
+  audio.play().catch(e => {
+    console.warn("Audio play blocked. User interaction required.", e);
+  });
+  
   return audio;
 };
 
@@ -1496,15 +1503,57 @@ export default function App() {
   const triggerAlarm = () => {
     setAlarmActive(true);
     setShowAlarmOverlay(true);
-    const audio = playSound(SOUNDS.alarm);
+    
+    // Crear y configurar el audio de alarma
+    const audio = new Audio(SOUNDS.alarm);
     audio.loop = true;
+    audio.volume = 0.3; // Empezar bajo
+    
+    // Intentar reproducir
+    audio.play().then(() => {
+      console.log('Alarma sonando correctamente');
+      
+      // Incrementar volumen gradualmente (más urgente)
+      let volumeLevel = 0.3;
+      const volumeInterval = setInterval(() => {
+        if (volumeLevel < 1.0) {
+          volumeLevel += 0.1;
+          audio.volume = Math.min(volumeLevel, 1.0);
+        } else {
+          clearInterval(volumeInterval);
+        }
+      }, 2000); // Cada 2 segundos sube el volumen
+      
+      // Guardar el interval para limpiarlo después
+      (audio as any).volumeInterval = volumeInterval;
+    }).catch(e => {
+      console.error('Error al reproducir alarma:', e);
+      // Si falla, intentar con interacción del usuario
+      alert('¡HORA DE DESPERTAR! La alarma necesita que hagas clic para sonar.');
+      audio.play();
+    });
+    
     setAlarmAudio(audio);
   };
 
   const stopAlarm = () => {
     if (alarmAudio) {
-      alarmAudio.pause();
-      alarmAudio.currentTime = 0;
+      // Limpiar el interval de volumen si existe
+      if ((alarmAudio as any).volumeInterval) {
+        clearInterval((alarmAudio as any).volumeInterval);
+      }
+      
+      // Fade out suave antes de parar
+      const fadeOutInterval = setInterval(() => {
+        if (alarmAudio.volume > 0.1) {
+          alarmAudio.volume = Math.max(0, alarmAudio.volume - 0.1);
+        } else {
+          clearInterval(fadeOutInterval);
+          alarmAudio.pause();
+          alarmAudio.currentTime = 0;
+        }
+      }, 50);
+      
       setAlarmAudio(null);
     }
     setAlarmActive(false);
@@ -1724,26 +1773,68 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-brand-primary flex flex-col items-center justify-center p-6 text-center"
+            className="fixed inset-0 z-[100] bg-gradient-to-br from-rose-500 via-brand-primary to-amber-500 flex flex-col items-center justify-center p-6 text-center"
           >
+            {/* Efecto de pulsación de fondo */}
             <motion.div
-              animate={{ scale: [1, 1.1, 1], rotate: [0, 5, -5, 0] }}
-              transition={{ repeat: Infinity, duration: 0.5 }}
-              className="bg-white p-12 rounded-full shadow-2xl mb-8"
+              animate={{ 
+                scale: [1, 1.5, 1],
+                opacity: [0.1, 0.3, 0.1]
+              }}
+              transition={{ repeat: Infinity, duration: 1 }}
+              className="absolute inset-0 bg-white"
+            />
+            
+            <motion.div
+              animate={{ 
+                scale: [1, 1.2, 1], 
+                rotate: [0, 10, -10, 0] 
+              }}
+              transition={{ repeat: Infinity, duration: 0.6 }}
+              className="bg-white p-12 rounded-full shadow-2xl mb-8 relative z-10"
             >
               <Sun className="w-32 h-32 text-brand-primary fill-current" />
             </motion.div>
-            <h1 className="text-5xl font-black text-white mb-4">¡HORA DE DESPERTAR!</h1>
-            <p className="text-white/80 text-xl font-bold mb-12">Supera el reto para apagar la alarma</p>
-            <button 
+            
+            <motion.h1 
+              animate={{ scale: [1, 1.05, 1] }}
+              transition={{ repeat: Infinity, duration: 0.5 }}
+              className="text-6xl font-black text-white mb-4 drop-shadow-2xl relative z-10"
+            >
+              ⏰ ¡HORA DE DESPERTAR! ⏰
+            </motion.h1>
+            
+            <motion.p 
+              animate={{ y: [0, -5, 0] }}
+              transition={{ repeat: Infinity, duration: 1 }}
+              className="text-white text-2xl font-black mb-12 drop-shadow-lg relative z-10"
+            >
+              🎮 Supera el reto para apagar la alarma 🎮
+            </motion.p>
+            
+            <motion.button 
               onClick={() => {
                 setShowAlarmOverlay(false);
                 setView('child');
               }}
-              className="pixar-button bg-white text-brand-primary text-2xl px-12 py-6 border-b-8 border-slate-200"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              animate={{ 
+                boxShadow: [
+                  '0 0 20px rgba(255,255,255,0.5)',
+                  '0 0 40px rgba(255,255,255,0.8)',
+                  '0 0 20px rgba(255,255,255,0.5)'
+                ]
+              }}
+              transition={{ repeat: Infinity, duration: 1 }}
+              className="relative z-10 bg-white text-rose-600 text-3xl font-black px-16 py-8 rounded-[3rem] border-b-8 border-slate-300 shadow-2xl hover:border-b-0 hover:translate-y-2 transition-all"
             >
-              ¡ACEPTAR RETO!
-            </button>
+              ✨ ¡ACEPTAR RETO! ✨
+            </motion.button>
+            
+            <p className="text-white/70 text-sm font-bold mt-8 relative z-10">
+              La alarma se apagará cuando completes el juego
+            </p>
           </motion.div>
         )}
 
