@@ -1073,6 +1073,33 @@ const ChildDashboard = ({ data, onAction, alarmActive }: { data: ChildData, onAc
                 </div>
               </div>
 
+              {/* Sleep Tips Card */}
+              <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[3rem] p-6 text-white shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 text-6xl opacity-20">🌙</div>
+                <div className="relative z-10 space-y-4">
+                  <h3 className="text-xl font-black flex items-center gap-2">
+                    <Moon className="w-6 h-6" /> ¿Sabías qué?
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="bg-white/20 backdrop-blur-sm p-3 rounded-2xl">
+                      <p className="text-sm font-bold">💤 Dormir bien te hace <strong>más inteligente</strong></p>
+                      <p className="text-xs text-white/80 mt-1">Tu cerebro organiza lo que aprendiste durante el día</p>
+                    </div>
+                    <div className="bg-white/20 backdrop-blur-sm p-3 rounded-2xl">
+                      <p className="text-sm font-bold">⚡ Más energía para jugar</p>
+                      <p className="text-xs text-white/80 mt-1">Descansar bien te da superpoderes para el día siguiente</p>
+                    </div>
+                    <div className="bg-white/20 backdrop-blur-sm p-3 rounded-2xl">
+                      <p className="text-sm font-bold">😊 Mejor humor y felicidad</p>
+                      <p className="text-xs text-white/80 mt-1">Los niños que duermen bien son más felices</p>
+                    </div>
+                  </div>
+                  <div className="bg-amber-400 text-slate-900 p-3 rounded-2xl text-center">
+                    <p className="font-black text-sm">🎯 META: ¡Apaga las luces antes de las 9 PM!</p>
+                  </div>
+                </div>
+              </div>
+
               {/* Action Button */}
               <button 
                 onClick={() => setView('game')}
@@ -1276,6 +1303,51 @@ const ParentDashboard = ({
       )}
 
       <div className="grid gap-6 max-w-4xl mx-auto">
+        {/* Banner de Consejos de Sueño */}
+        <div className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-[2.5rem] p-8 text-white relative overflow-hidden">
+          <div className="absolute inset-0 opacity-20">
+            <div className="absolute top-4 right-4 text-8xl">🌙</div>
+            <div className="absolute bottom-4 left-4 text-6xl">⭐</div>
+          </div>
+          <div className="relative z-10">
+            <h3 className="text-2xl font-black mb-4 flex items-center gap-2">
+              <Moon className="w-8 h-8" /> Consejos para Dormir Temprano
+            </h3>
+            <div className="grid md:grid-cols-2 gap-4 text-sm font-bold">
+              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-2xl">
+                <p className="mb-2">📱 <strong>Sin pantallas 1 hora antes</strong></p>
+                <p className="text-white/80 text-xs">La luz azul interrumpe la producción de melatonina</p>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-2xl">
+                <p className="mb-2">📚 <strong>Rutina de lectura nocturna</strong></p>
+                <p className="text-white/80 text-xs">Leer 20 minutos relaja la mente</p>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-2xl">
+                <p className="mb-2">🛏️ <strong>Misma hora todos los días</strong></p>
+                <p className="text-white/80 text-xs">El cuerpo necesita consistencia</p>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-2xl">
+                <p className="mb-2">🍽️ <strong>Cena ligera 2 horas antes</strong></p>
+                <p className="text-white/80 text-xs">Evitar comidas pesadas y azúcar</p>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-2xl">
+                <p className="mb-2">💡 <strong>Ambiente oscuro y fresco</strong></p>
+                <p className="text-white/80 text-xs">16-20°C es la temperatura ideal</p>
+              </div>
+              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-2xl">
+                <p className="mb-2">🧘 <strong>Ejercicio durante el día</strong></p>
+                <p className="text-white/80 text-xs">Mejora la calidad del sueño</p>
+              </div>
+            </div>
+            <div className="mt-6 p-4 bg-white/20 backdrop-blur-sm rounded-2xl">
+              <p className="text-xs">
+                <strong>👩‍⚕️ Recomendación Pediátrica:</strong> Niños de 6-12 años necesitan 9-12 horas de sueño. 
+                Un niño descansado aprende mejor, tiene mejor humor y más energía.
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
