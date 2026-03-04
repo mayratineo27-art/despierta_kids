@@ -19,21 +19,55 @@ function cn(...inputs: ClassValue[]) {
 const playSound = (url: string, loop = false) => {
   const audio = new Audio(url);
   audio.loop = loop;
-  audio.volume = 0.7; // Volumen al 70%
+  audio.volume = 0.8;
+  audio.crossOrigin = 'anonymous';
   
-  // Intentar reproducir, si falla por política del navegador, mostrar mensaje
-  audio.play().catch(e => {
-    console.warn("Audio play blocked. User interaction required.", e);
-  });
+  // Intentar reproducir
+  const playPromise = audio.play();
+  
+  if (playPromise !== undefined) {
+    playPromise.then(() => {
+      console.log('✅ Sonido reproducido:', url);
+    }).catch(e => {
+      console.error('❌ Error al reproducir sonido:', e);
+      // Fallback: crear un beep sintético
+      if (url.includes('alarm')) {
+        createBeepSound(800, 0.5, 'square');
+        setTimeout(() => createBeepSound(800, 0.5, 'square'), 600);
+      } else {
+        createBeepSound(600, 0.2, 'sine');
+      }
+    });
+  }
   
   return audio;
 };
 
+// Usar Web Audio API para crear sonidos sintetizados que siempre funcionen
+const createBeepSound = (frequency: number, duration: number, type: OscillatorType = 'sine') => {
+  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const oscillator = audioContext.createOscillator();
+  const gainNode = audioContext.createGain();
+  
+  oscillator.connect(gainNode);
+  gainNode.connect(audioContext.destination);
+  
+  oscillator.frequency.value = frequency;
+  oscillator.type = type;
+  
+  gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+  
+  oscillator.start(audioContext.currentTime);
+  oscillator.stop(audioContext.currentTime + duration);
+};
+
 const SOUNDS = {
-  alarm: 'https://assets.mixkit.co/sfx/preview/mixkit-morning-clock-alarm-995.mp3',
-  success: 'https://assets.mixkit.co/sfx/preview/mixkit-winning-chimes-2015.mp3',
-  click: 'https://assets.mixkit.co/sfx/preview/mixkit-simple-click-630.mp3',
-  buy: 'https://assets.mixkit.co/sfx/preview/mixkit-magic-notification-ring-2359.mp3'
+  // URLs alternativas más confiables
+  alarm: 'https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3',
+  success: 'https://www.soundjay.com/misc/sounds/magic-chime-02.mp3',
+  click: 'https://www.soundjay.com/button/sounds/button-09.mp3',
+  buy: 'https://www.soundjay.com/misc/sounds/cash-register-01.mp3'
 };
 
 // --- Types ---
@@ -1504,60 +1538,94 @@ export default function App() {
     setAlarmActive(true);
     setShowAlarmOverlay(true);
     
-    // Crear y configurar el audio de alarma
-    const audio = new Audio(SOUNDS.alarm);
-    audio.loop = true;
-    audio.volume = 0.3; // Empezar bajo
+    console.log('🔔 Activando alarma...');
     
-    // Intentar reproducir
-    audio.play().then(() => {
-      console.log('Alarma sonando correctamente');
-      
-      // Incrementar volumen gradualmente (más urgente)
-      let volumeLevel = 0.3;
-      const volumeInterval = setInterval(() => {
-        if (volumeLevel < 1.0) {
-          volumeLevel += 0.1;
-          audio.volume = Math.min(volumeLevel, 1.0);
-        } else {
-          clearInterval(volumeInterval);
+    // Sistema de alarma con múltiples respaldos
+    let alarmSound: HTMLAudioElement | null = null;
+    
+    // Intento 1: Usar URL externa
+    alarmSound = new Audio(SOUNDS.alarm);
+    alarmSound.loop = true;
+    alarmSound.volume = 0.5;
+    alarmSound.crossOrigin = 'anonymous';
+    
+    const playPromise = alarmSound.play();
+    
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        console.log('✅ Alarma sonando correctamente');
+        
+        // Incrementar volumen gradualmente
+        if (alarmSound) {
+          let volumeLevel = 0.5;
+          const volumeInterval = setInterval(() => {
+            if (volumeLevel < 1.0 && alarmSound) {
+              volumeLevel += 0.1;
+              alarmSound.volume = Math.min(volumeLevel, 1.0);
+            } else {
+              clearInterval(volumeInterval);
+            }
+          }, 1500);
+          
+          (alarmSound as any).volumeInterval = volumeInterval;
         }
-      }, 2000); // Cada 2 segundos sube el volumen
-      
-      // Guardar el interval para limpiarlo después
-      (audio as any).volumeInterval = volumeInterval;
-    }).catch(e => {
-      console.error('Error al reproducir alarma:', e);
-      // Si falla, intentar con interacción del usuario
-      alert('¡HORA DE DESPERTAR! La alarma necesita que hagas clic para sonar.');
-      audio.play();
-    });
+      }).catch(e => {
+        console.error('❌ Error con audio externo:', e);
+        
+        // Intento 2: Crear beeps sintéticos en loop
+        console.log('🔄 Usando sistema de beeps sintéticos...');
+        const beepInterval = setInterval(() => {
+          // Doble beep urgente
+          createBeepSound(880, 0.3, 'square');
+          setTimeout(() => createBeepSound(880, 0.3, 'square'), 350);
+        }, 1000);
+        
+        (alarmSound as any).beepInterval = beepInterval;
+        
+        // Mostrar mensaje al usuario
+        setToast({ 
+          message: '⏰ ¡ALARMA ACTIVA! Completa el reto para apagarla', 
+          type: 'info' 
+        });
+      });
+    }
     
-    setAlarmAudio(audio);
+    setAlarmAudio(alarmSound);
   };
 
   const stopAlarm = () => {
+    console.log('🛑 Apagando alarma...');
+    
     if (alarmAudio) {
-      // Limpiar el interval de volumen si existe
+      // Limpiar intervals
       if ((alarmAudio as any).volumeInterval) {
         clearInterval((alarmAudio as any).volumeInterval);
       }
+      if ((alarmAudio as any).beepInterval) {
+        clearInterval((alarmAudio as any).beepInterval);
+      }
       
-      // Fade out suave antes de parar
+      // Fade out suave
+      let currentVolume = alarmAudio.volume;
       const fadeOutInterval = setInterval(() => {
-        if (alarmAudio.volume > 0.1) {
-          alarmAudio.volume = Math.max(0, alarmAudio.volume - 0.1);
+        if (alarmAudio && currentVolume > 0.05) {
+          currentVolume = Math.max(0, currentVolume - 0.1);
+          alarmAudio.volume = currentVolume;
         } else {
           clearInterval(fadeOutInterval);
-          alarmAudio.pause();
-          alarmAudio.currentTime = 0;
+          if (alarmAudio) {
+            alarmAudio.pause();
+            alarmAudio.currentTime = 0;
+          }
         }
       }, 50);
       
       setAlarmAudio(null);
     }
+    
     setAlarmActive(false);
     setShowAlarmOverlay(false);
+    console.log('✅ Alarma apagada');
   };
 
   const fetchChildrenList = async () => {
@@ -1746,25 +1814,42 @@ export default function App() {
       </AnimatePresence>
 
       {/* View Switcher for Demo */}
-      <div className="fixed top-4 right-4 z-50 flex gap-2">
-        <button 
-          onClick={() => setView('child')}
-          className={cn("px-4 py-2 rounded-full text-xs font-black shadow-lg transition-all border-2", view === 'child' ? "bg-brand-primary text-white border-brand-primary" : "bg-white text-slate-600 border-slate-100")}
-        >
-          Modo Niño
-        </button>
-        <button 
-          onClick={() => setView('parent')}
-          className={cn("px-4 py-2 rounded-full text-xs font-black shadow-lg transition-all border-2", view === 'parent' ? "bg-brand-secondary text-white border-brand-secondary" : "bg-white text-slate-600 border-slate-100")}
-        >
-          Modo Padres
-        </button>
-        <button 
-          onClick={() => triggerAlarm()}
-          className="px-4 py-2 rounded-full text-xs font-black shadow-lg bg-rose-500 text-white border-2 border-rose-600"
-        >
-          Probar Alarma
-        </button>
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setView('child')}
+            className={cn("px-4 py-2 rounded-full text-xs font-black shadow-lg transition-all border-2", view === 'child' ? "bg-brand-primary text-white border-brand-primary" : "bg-white text-slate-600 border-slate-100")}
+          >
+            Modo Niño
+          </button>
+          <button 
+            onClick={() => setView('parent')}
+            className={cn("px-4 py-2 rounded-full text-xs font-black shadow-lg transition-all border-2", view === 'parent' ? "bg-brand-secondary text-white border-brand-secondary" : "bg-white text-slate-600 border-slate-100")}
+          >
+            Modo Padres
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => {
+              console.log('🔊 Probando sonido de éxito...');
+              playSound(SOUNDS.success);
+              createBeepSound(800, 0.2, 'sine');
+            }}
+            className="px-4 py-2 rounded-full text-xs font-black shadow-lg bg-emerald-500 text-white border-2 border-emerald-600 hover:bg-emerald-600"
+          >
+            🔊 Test Sonido
+          </button>
+          <button 
+            onClick={() => {
+              console.log('🔔 Activando alarma de prueba...');
+              triggerAlarm();
+            }}
+            className="px-4 py-2 rounded-full text-xs font-black shadow-lg bg-rose-500 text-white border-2 border-rose-600 hover:bg-rose-600"
+          >
+            🔔 Probar Alarma
+          </button>
+        </div>
       </div>
 
       <AnimatePresence mode="wait">
